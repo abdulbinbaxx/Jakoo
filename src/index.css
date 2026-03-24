@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-ayb-green: #007f3e;
+  --color-ayb-green-dark: #006632;
+  --color-ayb-green-light: #00a350;
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: 255 255 255;
+    --foreground: 31 41 55;
+  }
+
+  .dark {
+    --background: 17 24 39;
+    --foreground: 243 244 246;
+  }
+
+  body {
+    @apply bg-[rgb(var(--background))] text-[rgb(var(--foreground))] transition-colors duration-300;
+  }
+}
+
+.markdown-body {
+  @apply prose prose-slate max-w-none dark:prose-invert;
+}
