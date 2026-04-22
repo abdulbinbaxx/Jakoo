@@ -34,7 +34,9 @@ import {
   Menu,
   BookOpen,
   Layout,
-  LayoutDashboard
+  LayoutDashboard,
+  Youtube,
+  Play
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -93,8 +95,16 @@ interface QuizHistoryItem {
   date: string;
 }
 
+interface YouTubeVideo {
+  id: string;
+  title: string;
+  thumbnail: string;
+  channelTitle: string;
+  description: string;
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'summary' | 'quiz' | 'key-topics' | 'progress'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'summary' | 'quiz' | 'key-topics' | 'progress' | 'videos'>('dashboard');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [userName, setUserName] = useState<string>('');
@@ -116,6 +126,8 @@ export default function App() {
   const [quizScore, setQuizScore] = useState(0);
   const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([]);
   const [weakTopics, setWeakTopics] = useState<string[]>([]);
+  const [videos, setVideos] = useState<YouTubeVideo[]>([]);
+  const [isSearchingVideos, setIsSearchingVideos] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -151,6 +163,7 @@ export default function App() {
         if (data.showResults !== undefined) setShowResults(data.showResults);
         if (data.weakTopics) setWeakTopics(data.weakTopics);
         if (data.theme) setTheme(data.theme);
+        if (data.videos) setVideos(data.videos);
       } catch (e) {
         console.error("Failed to parse app state", e);
       }
@@ -169,7 +182,8 @@ export default function App() {
       quizScore,
       showResults,
       weakTopics,
-      theme
+      theme,
+      videos
     };
     localStorage.setItem('app_state', JSON.stringify(stateToSave));
     
@@ -286,6 +300,48 @@ export default function App() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
+  const fetchYouTubeVideos = async (topics: string[]) => {
+    if (topics.length === 0) return;
+    
+    setIsSearchingVideos(true);
+    try {
+      const model = "gemini-3-flash-preview";
+      const prompt = `Based on these study topics: ${topics.join(', ')}, find 10 highly relevant educational YouTube videos. 
+      Return a JSON array of objects with: id (YouTube video ID), title, thumbnail (high quality URL), channelTitle, and description.
+      Ensure the IDs are valid YouTube video IDs.`;
+      
+      const response = await ai.models.generateContent({
+        model,
+        contents: { parts: [{ text: prompt }] },
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                title: { type: Type.STRING },
+                thumbnail: { type: Type.STRING },
+                channelTitle: { type: Type.STRING },
+                description: { type: Type.STRING },
+              },
+              required: ['id', 'title', 'thumbnail', 'channelTitle', 'description']
+            }
+          }
+        }
+      });
+      
+      const foundVideos = JSON.parse(response.text || "[]");
+      setVideos(foundVideos);
+    } catch (err) {
+      console.error("Failed to fetch videos:", err);
+    } finally {
+      setIsSearchingVideos(false);
+    }
+  };
+
   const analyzeMaterials = async () => {
     if (files.length === 0) {
       setError("Please upload at least one file to analyze.");
@@ -332,6 +388,12 @@ export default function App() {
       });
 
       setAnalysisResult(response.text || "No analysis generated.");
+
+      // Extract topics and fetch videos
+      const topics = response.text?.match(/#{1,3}\s+(.+)/g)?.map(t => t.replace(/#{1,3}\s+/, '')) || [];
+      if (topics.length > 0) {
+        fetchYouTubeVideos(topics.slice(0, 10));
+      }
     } catch (err) {
       console.error("Analysis failed:", err);
       setError("Failed to analyze materials. Please check your files and try again.");
@@ -573,7 +635,18 @@ export default function App() {
         exit={{ opacity: 0, y: -20 }}
         className="space-y-8"
       >
-        <div className="relative overflow-hidden bg-ayb-green rounded-3xl p-8 lg:p-12 text-white shadow-2xl shadow-ayb-green/20">
+        <div className="relative overflow-hidden bg-gray-900 rounded-[2.5rem] p-8 lg:p-12 text-white shadow-2xl transition-all duration-500 group">
+          {/* Background Image */}
+          <div className="absolute inset-0 z-0">
+            <img 
+              src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop" 
+              alt="Technology Background"
+              className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-1000"
+              referrerPolicy="no-referrer"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-gray-900 via-gray-900/60 to-transparent" />
+          </div>
+
           <div className="relative z-10 max-w-2xl">
             <h2 className="text-4xl lg:text-5xl font-black tracking-tight mb-4 leading-tight">
               Welcome back, <span className="text-white/80 italic">{userName || 'Student'}</span>
@@ -608,29 +681,38 @@ export default function App() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all group">
-            <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+          <motion.div 
+            whileHover={{ y: -10, scale: 1.02 }}
+            className="bg-white dark:bg-gray-800/60 backdrop-blur-md p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-xl transition-all group perspective-1000"
+          >
+            <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-12 transition-all">
               <FileText className="w-6 h-6 text-blue-500 dark:text-blue-400" />
             </div>
             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Materials Analyzed</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-white">{files.length}</p>
-          </div>
+            <p className="text-3xl font-black text-gray-900 dark:text-white">{files.length}</p>
+          </motion.div>
           
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all group">
-            <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+          <motion.div 
+            whileHover={{ y: -10, scale: 1.02 }}
+            className="bg-white dark:bg-gray-800/60 backdrop-blur-md p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-xl transition-all group perspective-1000"
+          >
+            <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:-rotate-12 transition-all">
               <BrainCircuit className="w-6 h-6 text-purple-500 dark:text-purple-400" />
             </div>
             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Quizzes Taken</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-white">{quizHistory.length}</p>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all group">
-            <div className="w-12 h-12 bg-ayb-green/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+            <p className="text-3xl font-black text-gray-900 dark:text-white">{quizHistory.length}</p>
+          </motion.div>
+ 
+          <motion.div 
+            whileHover={{ y: -10, scale: 1.02 }}
+            className="bg-white dark:bg-gray-800/60 backdrop-blur-md p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-xl transition-all group perspective-1000"
+          >
+            <div className="w-12 h-12 bg-ayb-green/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-12 transition-all">
               <Trophy className="w-6 h-6 text-ayb-green" />
             </div>
             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Average Mastery</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-white">{averageScore}%</p>
-          </div>
+            <p className="text-3xl font-black text-gray-900 dark:text-white">{averageScore}%</p>
+          </motion.div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1451,8 +1533,121 @@ export default function App() {
   );
 };
 
+  const renderVideosSection = () => (
+    <motion.div
+      key="videos"
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="space-y-8"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Recommended Videos</h3>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Curated educational content based on your study materials.</p>
+        </div>
+        {isSearchingVideos && (
+          <div className="flex items-center gap-2 text-ayb-green font-bold text-sm animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Finding videos...
+          </div>
+        )}
+      </div>
+
+      {videos.length === 0 && !isSearchingVideos ? (
+        <div className="bg-white dark:bg-gray-800 rounded-[2.5rem] p-16 text-center border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="w-20 h-20 bg-gray-50 dark:bg-gray-900 rounded-3xl flex items-center justify-center mx-auto mb-6">
+            <Youtube className="w-10 h-10 text-gray-200 dark:text-gray-700" />
+          </div>
+          <h4 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No videos found yet</h4>
+          <p className="text-gray-500 dark:text-gray-400 max-w-sm mx-auto mb-8">Analyze your materials first to get personalized video recommendations.</p>
+          <button 
+            onClick={() => setActiveTab('upload')}
+            className="px-8 py-4 bg-ayb-green text-white rounded-2xl font-bold hover:bg-ayb-green-dark transition-all shadow-xl shadow-ayb-green/20"
+          >
+            Go to Upload
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {videos.map((video) => (
+            <div key={video.id} className="perspective-1000">
+              <motion.div
+                layout
+                initial={{ opacity: 0, scale: 0.9, rotateY: -10 }}
+                animate={{ opacity: 1, scale: 1, rotateY: 0 }}
+                whileHover={{ 
+                  scale: 1.05, 
+                  rotateY: 5,
+                  translateZ: 20,
+                  boxShadow: "0 25px 50px -12px rgba(0, 127, 62, 0.25)"
+                }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="group bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col h-full transform-gpu"
+              >
+              <div className="relative aspect-video overflow-hidden">
+                <img 
+                  src={video.thumbnail} 
+                  alt={video.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                  <a 
+                    href={`https://www.youtube.com/watch?v=${video.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white scale-0 group-hover:scale-100 transition-transform duration-300 hover:bg-white/40"
+                  >
+                    <Play className="w-8 h-8 fill-current" />
+                  </a>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] font-black uppercase tracking-widest rounded-md">YouTube</span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{video.channelTitle}</span>
+                </div>
+                <h4 className="font-bold text-gray-900 dark:text-white mb-2 line-clamp-2 leading-tight group-hover:text-ayb-green transition-colors">{video.title}</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">{video.description}</p>
+                <a 
+                  href={`https://www.youtube.com/watch?v=${video.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-6 flex items-center gap-2 text-sm font-bold text-ayb-green hover:underline"
+                >
+                  Watch Video
+                  <ChevronRight className="w-4 h-4" />
+                </a>
+              </div>
+            </motion.div>
+          </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+
   return (
-    <div className={`flex h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans selection:bg-ayb-green/20 overflow-hidden transition-colors duration-300`}>
+    <div className={`flex h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans selection:bg-ayb-green/20 overflow-hidden transition-colors duration-300 relative`}>
+      {/* 3D Animated Background Blobs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <motion.div 
+          animate={{ x: [0, 100, 0], y: [0, 50, 0] }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          className="absolute -top-40 -left-40 w-96 h-96 bg-ayb-green/10 rounded-full blur-[100px] animate-float" 
+        />
+        <motion.div 
+          animate={{ x: [0, -80, 0], y: [0, 100, 0] }}
+          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+          className="absolute top-1/2 -right-40 w-80 h-80 bg-blue-500/10 rounded-full blur-[120px] animate-float-delayed" 
+        />
+        <motion.div 
+          animate={{ x: [0, 50, 0], y: [0, -100, 0] }}
+          transition={{ duration: 22, repeat: Infinity, ease: "linear" }}
+          className="absolute -bottom-40 left-1/2 w-96 h-96 bg-purple-500/10 rounded-full blur-[110px]" 
+        />
+      </div>
       <AnimatePresence>
         {showOnboarding && renderOnboarding()}
       </AnimatePresence>
@@ -1465,25 +1660,30 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/40 z-40 lg:hidden backdrop-blur-md"
           />
         )}
       </AnimatePresence>
 
       {/* Sidebar */}
       <aside className={`
-        fixed lg:static inset-y-0 left-0 w-72 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-        flex flex-col shrink-0 z-50 transition-transform duration-300 lg:translate-x-0
+        fixed lg:static inset-y-0 left-0 w-72 glass-darker border-r border-gray-200/50 dark:border-gray-800/50
+        flex flex-col shrink-0 z-50 transition-all duration-500 ease-out lg:translate-x-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        shadow-2xl lg:shadow-none
       `}>
-        <div className="p-6 border-b border-gray-100 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-ayb-green rounded-xl flex items-center justify-center shadow-lg shadow-ayb-green/20">
-              <JakooLogo className="w-6 h-6 text-white" />
-            </div>
+        <div className="p-6 border-b border-gray-100/50 dark:border-gray-800/50">
+          <div className="flex items-center gap-4">
+            <motion.div 
+              whileHover={{ rotate: 180, scale: 1.1 }}
+              transition={{ type: "spring", stiffness: 200 }}
+              className="w-12 h-12 bg-ayb-green rounded-2xl flex items-center justify-center shadow-2xl shadow-ayb-green/30"
+            >
+              <JakooLogo className="w-7 h-7 text-white" />
+            </motion.div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight leading-none text-gray-900 dark:text-white">JAKOO</h1>
-              <p className="text-[10px] text-gray-400 font-medium mt-1 uppercase tracking-widest">AYB INDUSTRIES</p>
+              <h1 className="text-xl font-black tracking-tighter leading-none text-gray-900 dark:text-white uppercase transition-all duration-300 group-hover:tracking-normal">JAKOO</h1>
+              <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">AYB INDUSTRIES</p>
             </div>
           </div>
         </div>
@@ -1568,6 +1768,18 @@ export default function App() {
             <Trophy className="w-5 h-5" />
             Progress
           </button>
+
+          <button
+            onClick={() => { setActiveTab('videos'); setIsSidebarOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+              activeTab === 'videos' 
+                ? 'bg-ayb-green text-white shadow-md' 
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            <Youtube className="w-5 h-5" />
+            Study Videos
+          </button>
         </nav>
 
         <div className="p-4 border-t border-gray-100 dark:border-gray-700">
@@ -1589,9 +1801,9 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         {/* Top Bar */}
-        <header className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 lg:px-8 shrink-0">
+        <header className="h-20 glass border-b border-gray-200/50 dark:border-gray-800/50 flex items-center justify-between px-6 lg:px-12 shrink-0 transition-all duration-300">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(true)}
@@ -1606,6 +1818,7 @@ export default function App() {
               {activeTab === 'quiz' && 'Knowledge Quiz'}
               {activeTab === 'key-topics' && 'Key Topics'}
               {activeTab === 'progress' && 'Learning Progress'}
+              {activeTab === 'videos' && 'Recommended Videos'}
             </h2>
           </div>
           
@@ -1638,6 +1851,7 @@ export default function App() {
               {activeTab === 'quiz' && renderQuizSection()}
               {activeTab === 'key-topics' && renderKeyTopicsSection()}
               {activeTab === 'progress' && renderProgressSection()}
+              {activeTab === 'videos' && renderVideosSection()}
             </AnimatePresence>
           </div>
         </div>
